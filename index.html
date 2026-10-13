@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#10152d">
+<title>Coin Rush</title>
+<style>
+:root{color-scheme:dark;--gold:#ffd447;--cyan:#54e7e8;--bg:#10152d}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:manipulation}
+body{display:flex;justify-content:center;align-items:center;color:white}
+#app{position:relative;width:min(100vw,520px);height:100dvh;max-height:950px;overflow:hidden;background:linear-gradient(#17234b 0%,#263b70 48%,#10152d 100%)}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:absolute;top:max(14px,env(safe-area-inset-top));left:14px;right:14px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+.pill{background:#0b1028cc;border:1px solid #ffffff26;border-radius:16px;padding:8px 12px;font-size:13px;font-weight:800;box-shadow:0 5px 20px #0002}
+.pill strong{color:var(--gold);font-size:17px;display:block}
+#overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:#080d20a8}
+.panel{width:100%;max-width:350px;text-align:center;border:1px solid #ffffff2b;border-radius:28px;padding:26px 22px;background:linear-gradient(155deg,#202f5bfa,#10152df5);box-shadow:0 18px 70px #0008}
+.logo{font-size:clamp(35px,10vw,48px);font-weight:1000;line-height:1;letter-spacing:-2px;color:var(--gold);text-shadow:0 4px 0 #b86a17}
+.subtitle{color:#d9e4ff;margin:13px 0 18px;font-size:14px;line-height:1.5}
+button{font:inherit;border:0;border-radius:15px;font-weight:900;cursor:pointer}
+.primary{width:100%;padding:15px 18px;color:#22203a;background:linear-gradient(180deg,#ffe777,#ffbc32);box-shadow:0 5px 0 #b86a17;margin:6px 0}
+.secondary{width:100%;padding:12px 18px;color:white;background:#ffffff12;border:1px solid #ffffff2b;margin:6px 0}
+.tiny{font-size:11px;color:#aebee9;line-height:1.5;margin-top:14px}
+.controls{position:absolute;bottom:max(20px,env(safe-area-inset-bottom));left:0;right:0;display:flex;justify-content:center;gap:14px;padding:0 20px;pointer-events:none}
+.laneBtn{pointer-events:auto;width:68px;height:56px;border-radius:18px;color:#fff;background:#0b1028b8;border:1px solid #ffffff36;font-size:24px;backdrop-filter:blur(8px)}
+#toast{position:absolute;left:50%;bottom:100px;transform:translateX(-50%);background:#0b1028e8;border:1px solid #ffffff35;border-radius:99px;padding:10px 15px;font-size:12px;white-space:nowrap;display:none}
+@media(min-height:800px){.controls{bottom:max(30px,env(safe-area-inset-bottom))}}
+</style>
+</head>
+<body>
+<div id="app">
+ <canvas id="game" aria-label="Coin Rush game"></canvas>
+ <div class="hud">
+  <div class="pill">SCORE<strong id="score">0</strong></div>
+  <div class="pill">COINS <strong id="coins">0</strong></div>
+  <div class="pill">BEST <strong id="best">0</strong></div>
+ </div>
+ <div class="controls" id="controls" hidden>
+  <button class="laneBtn" id="left" aria-label="Move left">◀</button>
+  <button class="laneBtn" id="jump" aria-label="Jump">⬆</button>
+  <button class="laneBtn" id="right" aria-label="Move right">▶</button>
+ </div>
+ <div id="toast"></div>
+ <div id="overlay">
+  <div class="panel">
+   <div class="logo">COIN RUSH</div>
+   <div class="subtitle">Dodge the blocks. Grab the gold.<br>How long can you run?</div>
+   <button class="primary" id="start">▶ PLAY NOW</button>
+   <button class="secondary" id="how">HOW TO PLAY</button>
+   <div class="tiny">Free prototype • Coins are in-game points only<br>No real-money purchases or live ads are active.</div>
+  </div>
+ </div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),coinsEl=document.getElementById('coins'),bestEl=document.getElementById('best');
+const overlay=document.getElementById('overlay'),controls=document.getElementById('controls'),toast=document.getElementById('toast');
+let W=0,H=0,dpr=1,state='menu',playerLane=1,score=0,coins=0,best=Number(localStorage.getItem('coinRushBest')||0),speed=330,spawn=0,objects=[],particles=[],last=0,roadOffset=0,jumpT=0;
+bestEl.textContent=best;
+const lanes=[-.29,0,.29];
+function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;canvas.width=Math.floor(W*dpr);canvas.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
+new ResizeObserver(resize).observe(canvas);resize();
+function roadY(){return H*.18} function horizon(){return H*.22}
+function laneX(lane,y){const p=Math.max(0,Math.min(1,(y-horizon())/(H-horizon())));return W/2+lanes[lane]*W*(.15+.95*p)}
+function toastMsg(s){toast.textContent=s;toast.style.display='block';clearTimeout(toastMsg.t);toastMsg.t=setTimeout(()=>toast.style.display='none',1600)}
+function reset(){score=0;coins=0;speed=330;spawn=.6;objects=[];particles=[];playerLane=1;jumpT=0;roadOffset=0;scoreEl.textContent=0;coinsEl.textContent=0}
+function start(){reset();state='playing';overlay.style.display='none';controls.hidden=false;last=performance.now()}
+function end(){state='over';controls.hidden=true;best=Math.max(best,Math.floor(score));localStorage.setItem('coinRushBest',best);bestEl.textContent=best;overlay.style.display='flex';overlay.innerHTML=`<div class="panel"><div class="logo">RUN OVER!</div><div class="subtitle">Score <b style="color:#ffd447">${Math.floor(score)}</b><br>You collected <b style="color:#ffd447">${coins}</b> coins.</div><button class="primary" id="restart">↻ RUN AGAIN</button><button class="secondary" id="reward">▶ BONUS REWARD (DEMO)</button><div class="tiny">Rewarded ad is a demo placeholder. No ad is shown and no reward has cash value.</div></div>`;document.getElementById('restart').onclick=start;document.getElementById('reward').onclick=()=>toastMsg('Ad integration comes after launch setup.');}
+function move(d){if(state!=='playing')return;playerLane=Math.max(0,Math.min(2,playerLane+d))}
+function spawnObject(){let lane=Math.floor(Math.random()*3);let type=Math.random()<.29?'coin':'block';if(Math.random()<.15)type='barrier';objects.push({lane,y:horizon()-30,type,got:false})}
+function jump(){if(state==='playing'&&jumpT<=0)jumpT=.62}
+document.getElementById('start').onclick=start;
+document.getElementById('how').onclick=()=>{overlay.innerHTML='<div class="panel"><div class="logo" style="font-size:32px">HOW TO PLAY</div><div class="subtitle">Swipe left/right or use the arrows to change lanes. Tap the up arrow to jump over low barriers. Collect gold coins and avoid blocks. The longer you survive, the faster it gets.</div><button class="primary" id="backStart">GOT IT — PLAY</button></div>';document.getElementById('backStart').onclick=start};
+document.getElementById('left').onclick=()=>move(-1);document.getElementById('right').onclick=()=>move(1);document.getElementById('jump').onclick=jump;
+let sx=0,sy=0;canvas.addEventListener('pointerdown',e=>{sx=e.clientX;sy=e.clientY});canvas.addEventListener('pointerup',e=>{if(state!=='playing')return;let dx=e.clientX-sx,dy=e.clientY-sy;if(Math.abs(dx)>25)move(dx>0?1:-1);else if(dy< -22)jump()});
+window.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')move(-1);if(e.key==='ArrowRight'||e.key==='d')move(1);if(e.key==='ArrowUp'||e.key===' ')jump();if(e.key==='Enter'&&state!=='playing')start()});
+function rounded(x,y,w,h,r,fill){ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ // sky glow and stars
+ let grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,'#101936');grad.addColorStop(.5,'#263c72');grad.addColorStop(1,'#11162e');ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+ for(let i=0;i<28;i++){let x=(i*83+17)%W,y=(i*131+21)%(H*.5);ctx.fillStyle='#ffffff55';ctx.fillRect(x,y,2,2)}
+ // distant skyline
+ ctx.fillStyle='#19264c';for(let i=0;i<14;i++){let bw=W/10,bh=20+(i*37%80);ctx.fillRect(i*bw,H*.24-bh,bw-3,bh)}
+ // perspective road
+ ctx.fillStyle='#252d4d';ctx.beginPath();ctx.moveTo(W*.43,horizon());ctx.lineTo(W*.57,horizon());ctx.lineTo(W*.98,H);ctx.lineTo(W*.02,H);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#6578a5';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(W*.43,horizon());ctx.lineTo(W*.02,H);ctx.moveTo(W*.57,horizon());ctx.lineTo(W*.98,H);ctx.stroke();
+ for(let i=1;i<=2;i++){ctx.strokeStyle='#ffffff44';ctx.lineWidth=2;ctx.setLineDash([20,18]);ctx.lineDashOffset=-roadOffset;ctx.beginPath();ctx.moveTo(W/2+lanes[i-1]*W*.15,horizon());ctx.lineTo(W/2+lanes[i-1]*W*1.3,H);ctx.stroke();ctx.setLineDash([])}
+ // objects
+ objects.forEach(o=>{let p=(o.y-horizon())/(H-horizon()),x=laneX(o.lane,o.y),sz=18+Math.max(0,p)*42;if(o.type==='coin'){ctx.save();ctx.translate(x,o.y);ctx.scale(.8+Math.max(0,p)*.3,1);ctx.fillStyle='#ffbf24';ctx.beginPath();ctx.ellipse(0,0,sz*.48,sz*.62,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff08a';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#b66b11';ctx.font=`bold ${sz*.8}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',0,1);ctx.restore()}else{let h=sz*1.45,w=sz*1.15;rounded(x-w/2,o.y-h/2,w,h,o.type==='barrier'?5:8,o.type==='barrier'?'#ef7b55':'#f34f75');rounded(x-w/2+4,o.y-h/2+4,w-8,h*.25,4,'#ffb2a0');ctx.fillStyle='#9f294e';ctx.fillRect(x-w*.3,o.y+h*.25,w*.6,4)}});
+ // player
+ let px=laneX(playerLane,H*.78),py=H*.78,scale=1+(jumpT>0?Math.sin((jumpT/.62)*Math.PI)*.55:0);
+ ctx.fillStyle='#0006';ctx.beginPath();ctx.ellipse(px,py+26,23/scale,8/scale,0,0,Math.PI*2);ctx.fill();
+ ctx.save();ctx.translate(px,py-(scale-1)*42);ctx.scale(scale,scale);
+ rounded(-16,-29,32,48,11,'#54e7e8');rounded(-11,-44,22,21,8,'#ffcfaa');rounded(-13,-48,26,10,5,'#ffd447');
+ ctx.fillStyle='#17234b';ctx.fillRect(-8,-36,5,4);ctx.fillRect(4,-36,5,4);
+ rounded(-13,14,10,19,4,'#ffcfaa');rounded(3,14,10,19,4,'#ffcfaa');
+ ctx.restore();
+ // sparkles
+ particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1});
+}
+function update(dt){if(state!=='playing')return;score+=dt*10;speed=Math.min(670,330+score*1.25);roadOffset=(roadOffset+speed*dt*.5)%38;spawn-=dt;if(spawn<=0){spawnObject();spawn=Math.max(.38,1.02-score/950)+(Math.random()*.35)}if(jumpT>0)jumpT=Math.max(0,jumpT-dt);
+ objects.forEach(o=>o.y+=speed*dt*(o.type==='coin'?1.04:1));
+ const py=H*.78;for(let i=objects.length-1;i>=0;i--){let o=objects[i];if(o.y>py-24&&o.y<py+28&&o.lane===playerLane&&!o.got){if(o.type==='coin'){o.got=true;coins++;score+=25;coinsEl.textContent=coins;for(let k=0;k<7;k++)particles.push({x:laneX(o.lane,o.y),y:o.y,life:.7,color:'#ffd447',r:2+Math.random()*3,vx:(Math.random()-.5)*100,vy:-40-Math.random()*90});}else if(o.type==='barrier'&&jumpT>0.18){o.got=true;score+=5}else{end();return}}if(o.y>H+60)objects.splice(i,1)}
+ particles.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});particles=particles.filter(p=>p.life>0);
+ scoreEl.textContent=Math.floor(score);
+}
+function frame(t){let dt=Math.min(.035,(t-last)/1000||0);last=t;update(dt);draw();requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
